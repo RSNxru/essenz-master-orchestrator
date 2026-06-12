@@ -1,0 +1,45 @@
+<svg width="860" height="430" viewBox="0 0 860 430" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="flecha" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#5f5e5a"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="820" height="390" rx="12" fill="#fafaf8" stroke="#d3d1c7"/>
+  <text x="40" y="52" font-size="15" font-weight="600" fill="#444441">Enrutamiento por path — lo público vs. lo interno</text>
+
+  <!-- Gateway -->
+  <rect x="40" y="90" width="220" height="280" rx="8" fill="#e1f5ee" stroke="#0f6e56"/>
+  <text x="150" y="120" font-size="14" font-weight="600" fill="#085041" text-anchor="middle">Gateway :8080</text>
+  <text x="150" y="142" font-size="11" fill="#0f6e56" text-anchor="middle">resolver 127.0.0.11 · TTL 10s</text>
+
+  <text x="60" y="180" font-size="12" font-family="Consolas, monospace" fill="#085041">/api/auth/…</text>
+  <text x="60" y="230" font-size="12" font-family="Consolas, monospace" fill="#085041">/api/notifications/…</text>
+  <text x="60" y="280" font-size="12" font-family="Consolas, monospace" fill="#085041">/api/events/…</text>
+  <text x="60" y="330" font-size="12" font-family="Consolas, monospace" fill="#085041">/health/auth|events/</text>
+
+  <!-- Rewrites -->
+  <line x1="260" y1="175" x2="438" y2="135" stroke="#5f5e5a" stroke-width="1.5" marker-end="url(#flecha)"/>
+  <text x="350" y="142" font-size="11" fill="#854f0b" text-anchor="middle">rewrite → /api/v1/auth/…</text>
+
+  <line x1="260" y1="225" x2="438" y2="225" stroke="#5f5e5a" stroke-width="1.5" marker-end="url(#flecha)"/>
+  <text x="350" y="215" font-size="11" fill="#5f5e5a" text-anchor="middle">sin rewrite (coinciden)</text>
+
+  <line x1="260" y1="275" x2="438" y2="315" stroke="#5f5e5a" stroke-width="1.5" marker-end="url(#flecha)"/>
+  <text x="350" y="308" font-size="11" fill="#854f0b" text-anchor="middle">rewrite → /api/v1/events/…</text>
+
+  <!-- Destinos -->
+  <rect x="440" y="100" width="380" height="64" rx="8" fill="#f1efe8" stroke="#b4b2a9"/>
+  <text x="630" y="126" font-size="13" font-weight="600" fill="#444441" text-anchor="middle">essenz_auth:8000</text>
+  <text x="630" y="148" font-size="11" font-family="Consolas, monospace" fill="#5f5e5a" text-anchor="middle">/api/v1/auth/… · /health/</text>
+
+  <rect x="440" y="193" width="380" height="64" rx="8" fill="#f1efe8" stroke="#b4b2a9"/>
+  <text x="630" y="219" font-size="13" font-weight="600" fill="#444441" text-anchor="middle">essenz_notifications:8000</text>
+  <text x="630" y="241" font-size="11" font-family="Consolas, monospace" fill="#5f5e5a" text-anchor="middle">/api/notifications/…</text>
+
+  <rect x="440" y="286" width="380" height="64" rx="8" fill="#f1efe8" stroke="#b4b2a9"/>
+  <text x="630" y="312" font-size="13" font-weight="600" fill="#444441" text-anchor="middle">essenz_events:8000</text>
+  <text x="630" y="334" font-size="11" font-family="Consolas, monospace" fill="#5f5e5a" text-anchor="middle">/api/v1/events/… · /health/</text>
+
+  <text x="40" y="395" font-size="11" fill="#5f5e5a">El admin de Django y Swagger no pasan por el gateway (rutas absolutas): acceso directo por :8000 / :8001 / :8002 en desarrollo.</text>
+</svg>

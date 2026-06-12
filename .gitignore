@@ -1,0 +1,23 @@
+# ============================================================
+# Essenz Master Orchestrator — .gitignore
+# ============================================================
+
+# Los tres microservicios son repos propios: se clonan al lado,
+# no se versionan aquí (ver docs/04-operaciones.md)
+essenz-auth/
+essenz-notifications/
+essenz-events/
+
+# Proyectos ajenos al orquestador que conviven en esta carpeta
+InventarioStock/
+
+# Material de estudio local (PDFs y sus carpetas de build): NO se sube
+*.pdf
+_pdf_build/
+_tmp_pdf/
+
+# Entorno local
+.env
+.claude/
+__pycache__/
+*.pyc

@@ -1,0 +1,310 @@
+# =============================================================
+# ESSENZ MASTER ORCHESTRATOR
+# =============================================================
+# Levanta el ecosistema completo (Nivel 1) con un solo comando:
+#
+#   docker compose up -d --build
+#
+# - Un único punto de entrada público: el gateway en :8080.
+# - Red interna essenz_network: los servicios se hablan por
+#   nombre de contenedor (http://essenz_events:8000, etc.).
+# - No duplica lógica: usa los build contexts de cada proyecto
+#   y sus .env; las variables CRUZADAS (quién habla con quién)
+#   se sobrescriben aquí vía `environment:` porque en Compose
+#   `environment:` tiene prioridad sobre `env_file:`.
+#
+# IMPORTANTE: antes de levantar este stack, baja los stacks
+# individuales (comparten puertos de desarrollo):
+#   docker compose -f essenz-auth/docker-compose.yml down
+#   docker compose -f essenz-notifications/docker-compose.yml down
+#   docker compose -f essenz-events/docker-compose.yml down
+# =============================================================
+
+name: essenz
+
+# ------------------------------------------------------------------
+# Red interna única del ecosistema
+# ------------------------------------------------------------------
+networks:
+  essenz_network:
+    name: essenz_network
+    driver: bridge
+
+services:
+  # ================================================================
+  # API GATEWAY — único puerto expuesto "al exterior" (8080)
+  # ================================================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: essenz_gateway
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - essenz_network
+    depends_on:
+      auth_web:
+        condition: service_started
+      notifications_web:
+        condition: service_started
+      events_web:
+        condition: service_started
+
+  # ================================================================
+  # ESSENZ AUTH — autenticación (Django/DRF + PostgreSQL)
+  # ================================================================
+  auth_db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # El .env del proyecto ya define POSTGRES_DB/USER/PASSWORD
+    env_file:
+      - ./essenz-auth/.env
+    volumes:
+      - essenz_auth_pgdata:/var/lib/postgresql/data
+    ports:
+      # Solo dev: inspección con pgAdmin/DBeaver
+      - "5432:5432"
+    networks:
+      - essenz_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth_web:
+    build:
+      context: ./essenz-auth
+      dockerfile: Dockerfile
+    container_name: essenz_auth
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./essenz-auth:/app
+    env_file:
+      - ./essenz-auth/.env
+    environment:
+      # --- Variables cruzadas (sobrescriben al .env) ---
+      # En el stack maestro la DB de auth se llama auth_db, no "db"
+      POSTGRES_HOST: auth_db
+      # Hub de eventos del ecosistema (Nivel 2: auth publicará
+      # user.registered aquí; la variable ya queda disponible)
+      ESSENZ_EVENTS_URL: http://essenz-events:8000/api/v1/events/
+    ports:
+      # Solo dev: acceso directo a admin/ y api/docs/ de auth
+      - "8000:8000"
+    networks:
+      essenz_network:
+        aliases:
+          # Hostname RFC-válido para llamadas entre servicios: Django
+          # rechaza Host con "_" (essenz_auth) por RFC 1034/1035
+          - essenz-auth
+    depends_on:
+      auth_db:
+        condition: service_healthy
+
+  # ================================================================
+  # ESSENZ NOTIFICATIONS — despachador (Django + Celery + Redis + n8n)
+  # ================================================================
+  notifications_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      # Solo dev: redis-cli / RedisInsight
+      - "6379:6379"
+    volumes:
+      - essenz_notifications_redisdata:/data
+    networks:
+      - essenz_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  notifications_web:
+    build:
+      context: ./essenz-notifications
+      dockerfile: Dockerfile
+    container_name: essenz_notifications
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./essenz-notifications:/app
+    env_file:
+      - ./essenz-notifications/.env
+    environment: &notifications_cross_env
+      # --- Variables cruzadas (sobrescriben al .env) ---
+      # El redis de este servicio se llama notifications_redis aquí
+      REDIS_URL: redis://notifications_redis:6379/0
+      CELERY_BROKER_URL: redis://notifications_redis:6379/0
+      CELERY_RESULT_BACKEND: redis://notifications_redis:6379/1
+      # n8n vive en la misma red: se resuelve por nombre de servicio
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/essenz-events
+    ports:
+      # Solo dev: acceso directo a admin/ y api/docs/ de notifications
+      - "8001:8000"
+    networks:
+      essenz_network:
+        aliases:
+          # Hostname RFC-válido (Django rechaza Host con "_")
+          - essenz-notifications
+    depends_on:
+      notifications_redis:
+        condition: service_healthy
+
+  notifications_worker:
+    build:
+      context: ./essenz-notifications
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A config worker --loglevel=info
+    volumes:
+      - ./essenz-notifications:/app
+    env_file:
+      - ./essenz-notifications/.env
+    # El worker despacha los canales: necesita las mismas URLs cruzadas
+    environment: *notifications_cross_env
+    networks:
+      - essenz_network
+    depends_on:
+      notifications_redis:
+        condition: service_healthy
+      notifications_web:
+        # Espera a que web aplique las migraciones antes de consumir tareas
+        condition: service_started
+
+  n8n:
+    build:
+      context: ./essenz-notifications/n8n
+      dockerfile: Dockerfile
+    container_name: essenz_n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Mexico_City
+      - N8N_COMMUNITY_PACKAGES_ENABLED=true
+      - N8N_SECURE_COOKIE=false
+    volumes:
+      - essenz_n8n_data:/home/node/.n8n
+    networks:
+      - essenz_network
+
+  # ================================================================
+  # ESSENZ EVENTS — hub de eventos (Django + Celery + Redis + PG)
+  # ================================================================
+  events_db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ./essenz-events/.env
+    volumes:
+      - essenz_events_pgdata:/var/lib/postgresql/data
+    ports:
+      # Solo dev: 5433 para no chocar con auth_db (5432)
+      - "5433:5432"
+    networks:
+      - essenz_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  events_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      # Solo dev: 6380 para no chocar con notifications_redis (6379)
+      - "6380:6379"
+    volumes:
+      - essenz_events_redisdata:/data
+    networks:
+      - essenz_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  events_web:
+    build:
+      context: ./essenz-events
+      dockerfile: Dockerfile
+    container_name: essenz_events
+    restart: unless-stopped
+    # ensure_superuser es idempotente: crea el admin solo si falta
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py ensure_superuser &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./essenz-events:/app
+    env_file:
+      - ./essenz-events/.env
+    environment: &events_cross_env
+      # --- Variables cruzadas (sobrescriben al .env) ---
+      POSTGRES_HOST: events_db
+      CELERY_BROKER_URL: redis://events_redis:6379/0
+      CELERY_RESULT_BACKEND: redis://events_redis:6379/1
+      # Ya en la red interna: adiós host.docker.internal
+      ESSENZ_NOTIFICATIONS_WEBHOOK_URL: http://essenz-notifications:8000/api/notifications/send/
+    ports:
+      # Solo dev: acceso directo a admin/ y api/docs/ de events
+      - "8002:8000"
+    networks:
+      essenz_network:
+        aliases:
+          # Hostname RFC-válido (Django rechaza Host con "_")
+          - essenz-events
+    depends_on:
+      events_db:
+        condition: service_healthy
+      events_redis:
+        condition: service_healthy
+
+  events_worker:
+    build:
+      context: ./essenz-events
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A config worker --loglevel=info
+    volumes:
+      # Celery no recarga código solo; tras editar handlers:
+      # docker compose restart events_worker
+      - ./essenz-events:/app
+    env_file:
+      - ./essenz-events/.env
+    # Los handlers corren en el worker: mismas URLs cruzadas que web
+    environment: *events_cross_env
+    networks:
+      - essenz_network
+    depends_on:
+      events_db:
+        condition: service_healthy
+      events_redis:
+        condition: service_healthy
+      events_web:
+        # Espera a que web aplique las migraciones antes de consumir tareas
+        condition: service_started
+
+# ------------------------------------------------------------------
+# Volúmenes nombrados (persisten entre reinicios del stack maestro)
+# ------------------------------------------------------------------
+volumes:
+  essenz_auth_pgdata:
+  essenz_notifications_redisdata:
+  essenz_n8n_data:
+  essenz_events_pgdata:
+  essenz_events_redisdata:
