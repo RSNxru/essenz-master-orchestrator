@@ -2,14 +2,17 @@
 # Essenz Master Orchestrator — .gitignore
 # ============================================================
 
-# Los tres microservicios son repos propios: se clonan al lado,
-# no se versionan aquí (ver docs/04-operaciones.md)
+# Los microservicios y frontends son repos propios: se clonan al
+# lado, no se versionan aquí (ver docs/04-operaciones.md)
 essenz-auth/
 essenz-notifications/
 essenz-events/
+essenz-mundial/
+essenz-portal/
 
 # Proyectos ajenos al orquestador que conviven en esta carpeta
 InventarioStock/
+StreamDLP/
 
 # Material de estudio local (PDFs y sus carpetas de build): NO se sube
 *.pdf

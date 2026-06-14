@@ -51,6 +51,43 @@ services:
         condition: service_started
       events_web:
         condition: service_started
+      portal_web:
+        condition: service_started
+      inshop_web:
+        condition: service_started
+
+  # ================================================================
+  # ESSENZ PORTAL — Landing + Hub "Essenz Master" (frontend, raíz /)
+  # ================================================================
+  portal_web:
+    build:
+      context: ./essenz-portal
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        # En dev los canales apuntan al gateway local; en prod, a essenz.cl
+        VITE_ESSENZ_DOMINIO: ${VITE_ESSENZ_DOMINIO:-http://localhost:8080}
+    container_name: essenz_portal
+    restart: unless-stopped
+    networks:
+      - essenz_network
+
+  # ================================================================
+  # INSHOP — app de inventario (frontend, ruta /InShop)
+  # Repo independiente; build context fuera de este directorio.
+  # ================================================================
+  inshop_web:
+    build:
+      context: ../InShop
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    container_name: essenz_inshop
+    restart: unless-stopped
+    networks:
+      - essenz_network
 
   # ================================================================
   # ESSENZ AUTH — autenticación (Django/DRF + PostgreSQL)
